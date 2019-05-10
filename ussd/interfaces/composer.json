@@ -1,0 +1,6 @@
+{
+    "require": {
+        "monolog/monolog": "^1.23",
+        "j4mie/idiorm": "^1.5"
+    }
+}

@@ -1,0 +1,296 @@
+<?php
+
+/**
+ * Routing Logic
+ * 
+ * This class is responsible for routing of requests to respective menu systems 
+ * and logging/updating the Activities table.It uses HTTP-POST to achieve this 
+ * and handles various levels of failure. Interacts directly with the USSDInterface
+ * component
+ * 
+ */
+class USSDRouter {
+
+    /**
+     *
+     * @var object of activities class
+     */
+    public $activitiesclass;
+
+    /**
+     *
+     * @var object of the DBUtils class
+     */
+    public $dbUtils;
+
+    /**
+     *
+     * @var object of type Logger
+     */
+    public $logger;
+
+    /**
+     *
+     * @var array log params
+     */
+    public $logparams;
+
+    /**
+     * Class constructor. Initialization of global variables from MNO
+     * @param string $MSISDN
+     * @param string $SESSIONSTATE //will be useful if MNO tells us to terminate this session or not
+     * @param string $ACCESSPOINT
+     * @param string $USSD_INPUT //user input
+     * @param long $SESSION_ID
+     * @param int $NETWORK_ID
+     * @params array $LOGPARAMS attributes to log to file.
+     */
+    function __construct($MSISDN, $SESSIONSTATE, $ACCESSPOINT, $USSD_INPUT, $SESSION_ID, $NETWORK_ID, $LOGPARAMS) {
+
+        $this->dbUtils = new DbUtils();
+        $encryptedInput = base64_encode($USSD_INPUT);
+        //create USSDActivity object and assing various attributes that are available.
+        $this->activitiesclass = new USSDActivity($MSISDN, $SESSIONSTATE, $ACCESSPOINT, $encryptedInput, $SESSION_ID, $NETWORK_ID, $LOGPARAMS, $this->dbUtils);
+
+        $this->logparams = $LOGPARAMS;
+    }
+
+    /**
+     * This function formulates parameters and call log activities function in 
+     * the activities class. The calls computeRoute to fetch either external url
+     * or menu url and then invokeMenu to post variables to fetch menu content. 
+     * 
+     * @return string synchronous message
+     * 
+     */
+    public function processRoutingRequest() {
+
+        // N:B If the MNO sent an ABORT processing should branch
+        $logResult = $this->activitiesclass->logActivities();
+        if ($this->activitiesclass->sessionState == 'ABORT') {
+            die;
+        }
+
+        if ($logResult['SUCCESS'] == TRUE) {
+
+            $this->logparams['message'] = 'Successfully logged to activities table, now fetching URL to invoke';
+            CoreUtils::flog4php(4, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussdinfo", USSD_LOG_PROPERTIES);
+
+            // Last insert id to be used for update. so we initialize it here
+            $this->activitiesclass->activityID = rand(1,100);
+
+            // Get URL  and various params
+            //$URL = $this->computeRoute();
+	    $URL = array(
+		'SUCCESS' => true,
+		'DATA' => array(
+			//'apiUrl' => 'http://localhost/county/channels/ussd/menus/dynamic_menus/Ussd/Ussd.php',
+			//'apiUrl' => 'http://localhost/ipesav4/channels/ussd/menus/dynamic_menus/selfService/iPesaUssd.php',
+			//'apiUrl' => 'http://localhost/kwigira/web/channels/ussd/menus/dynamic_menus/microCredit/microCredit.php',
+			'apiUrl' => 'http://localhost/ipesav4/channels/ussd/menus/dynamic_menus/waterUssd/waterUSSD.php',
+			'apiPortNumber' => '80',
+			'clientSystemID' => 1,
+			'expiryPeriod' => '',
+			),	
+		);
+
+            $this->logparams['message'] = 'Response after fetching URL from the hub channels database:' . json_encode($URL, JSON_FORCE_OBJECT);
+            CoreUtils::flog4php(4, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussdinfo", USSD_LOG_PROPERTIES);
+			
+
+            // We have the URL and respective client configurd data
+            if ($URL['SUCCESS'] == TRUE) {
+
+                // Send request to system using fetched URL 
+                $requeststatus = $this->invokeMenu($URL['DATA']);
+
+                switch ($requeststatus['DATA']['HTTP_STATUS']) {
+                    case 200:
+
+                        // HTTP response success 
+                        $this->logparams['message'] = "sending success message back to MNO: " . $requeststatus['MESSAGE'];
+                        CoreUtils::flog4php(4, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussdinfo", USSD_LOG_PROPERTIES);
+
+                        $this->activitiesclass->updateActivities($requeststatus['DATA']['JSON_RESPONSE'], SUCCESS_UPDATE_STATUS);
+
+                        // Return valid JSON response from menu system
+                        return $requeststatus['DATA']['JSON_RESPONSE'];
+
+                        break;
+                    case 0:
+                        /** Read response time-out error * */
+                        // Log error to file 
+                        $this->logparams['message'] = "Read Response time-out: Failed to invoke external or menu url. Reason" . $requeststatus['MESSAGE'];
+                        CoreUtils::flog4php(3, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussderror", USSD_LOG_PROPERTIES);
+                        //appropriate synchronous error message end session
+                        $errormessage = ERROR_MESSAGE_HTTP_RESPONSE_TIMEOUT;
+                        $jsonerror = $this->errorResponse($errormessage);
+                        $this->activitiesclass->updateActivities($jsonerror, TIME_OUT_ERROR_STATUS);
+                        return $jsonerror;
+
+                        break;
+
+                    case 404:
+
+                        /** URL not found HTTP error * */
+                        // Log error 
+                        $this->logparams['message'] = "404 Error: Failed to invoke external or menu url. Reason" . $requeststatus['MESSAGE'];
+                        CoreUtils::flog4php(3, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussderror", USSD_LOG_PROPERTIES);
+
+                        //appropriate synchronous error message end session
+                        $errormessage = ERROR_MESSAGE_HTTP_404;
+                        $jsonerror = $this->errorResponse($errormessage);
+                        $this->activitiesclass->updateActivities($jsonerror, ROUTE_NOT_FOUND_STATUS);
+                        return $jsonerror;
+
+                        break;
+                    case 500:
+                        /** Server error - script error * */
+                        // Log error 
+                        $this->logparams['message'] = "500 Error: Failed to invoke external or menu url. Reason" . $requeststatus['MESSAGE'];
+                        CoreUtils::flog4php(3, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussderror", USSD_LOG_PROPERTIES);
+
+                        // Appropriate synchronous error message end session
+                        $errormessage = ERROR_MESSAGE_HTTP_500;
+                        $jsonerror = $this->errorResponse($errormessage);
+                         $this->activitiesclass->updateActivities($jsonerror, INTERNAL_SERVER_ERROR_STATUS);
+                        return $jsonerror;
+
+                        break;
+
+                    default :
+                        $this->logparams['message'] = "Experienced Unknown http Error code" . $requeststatus['DATA']['HTTP_STATUS'];
+                        CoreUtils::flog4php(3, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussderror", USSD_LOG_PROPERTIES);
+
+                        // Appropriate synchronous error message end session
+                        $errormessage = ERROR_UNKNOWN_HTTP_ERROR;
+                        $jsonerror = $this->errorResponse($errormessage);
+                        $this->activitiesclass->updateActivities($jsonerror, UNKNOWN_ERROR_STATUS);
+                        return $jsonerror;
+                }
+            } else {
+                // Failed to get URL to route request to
+                $this->logparams['message'] = "Failed fetch URL, Reason:" . $URL['MESSAGE'];
+                CoreUtils::flog4php(3, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussderror", USSD_LOG_PROPERTIES);
+
+                //appropriate synchronous error message end session
+                $errormessage = ERROR_FETCH_MENU_SYSTEM_URL;
+                $jsonerror = $this->errorResponse($errormessage);
+                return $jsonerror;
+            }
+        } else {
+            // Failure logging request within the activities table
+            $this->logparams['message'] = "Failed to log within activities table. Reason" . $logResult['MESSAGE'];
+            CoreUtils::flog4php(3, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussderror", USSD_LOG_PROPERTIES);
+
+            // Appropriate synchronous error message end session
+            $errormessage = ERROR_LOG_TO_USSD_ACTIVITIES;
+            $jsonerror = $this->errorResponse($errormessage);
+            return $jsonerror;
+        }
+    }
+
+
+
+    /**
+     * POST based invocation to either the dynamic menus, external menus wrappers or the static processor
+     * @param array $urlmetadata
+     * 
+     * @return string response message
+     */
+    public function invokeMenu($urlmetadata) {
+
+        $MENU_URL = $urlmetadata['apiUrl'];
+        $PORT_NUMBER = $urlmetadata['apiPortNumber'];
+        $CLIENT_SYSTEM_ID = $urlmetadata['clientSystemID'];
+        $CLIENT_SYSTEM_EXPIRY_PERIOD = $urlmetadata['expiryPeriod'];
+
+        $this->activitiesclass->clientSystemID = $CLIENT_SYSTEM_ID; //critical for update so we initialize it here
+
+        $params = array();
+
+        // Invoke menu/wrapper/system url with all set activities params via post
+        $params['activityID'] = $this->activitiesclass->activityID;
+        $params['clientSystemID'] = $this->activitiesclass->clientSystemID;
+        $params['MSISDN'] = $this->activitiesclass->MSISDN;
+        $params['accessPoint'] = $this->activitiesclass->accessPoint;
+        $params['input'] = $this->activitiesclass->input;
+        $params['gatewayID'] = $this->activitiesclass->gatewayID;
+        $params['gatewayUID'] = $this->activitiesclass->gatewayUID;
+        $params['requestPayload'] = $this->activitiesclass->requestPayload;
+        $params['connectorID'] = $this->activitiesclass->connectorID;
+        $params['networkID'] = $this->activitiesclass->networkID;
+        $params['sessionID'] = $this->activitiesclass->sessionID;
+        $params['expiryPeriod'] = $CLIENT_SYSTEM_EXPIRY_PERIOD;
+        $params['externalSystemServiceID'] = $this->activitiesclass->externalSystemServiceID;
+        $params['sessionState'] = $this->activitiesclass->sessionState;
+        $params['IMCID'] = $this->activitiesclass->IMCID;
+        $params['clientACKID'] = $this->activitiesclass->clientACKID;
+        $params['serviceDescription'] = $this->activitiesclass->serviceDescription;
+        $params['expiryDate'] = $this->activitiesclass->expiryDate;
+        $params['responsePayload'] = $this->activitiesclass->responsePayload;
+
+        $this->logparams['message'] = "Sending data via POST to :" . $MENU_URL . " data is..." . json_encode($params, JSON_FORCE_OBJECT);
+        CoreUtils::flog4php(4, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussdinfo", USSD_LOG_PROPERTIES);
+
+        $ch = curl_init();
+
+        // Set the url, number of POST vars, POST data
+        curl_setopt($ch, CURLOPT_URL, $MENU_URL);
+        curl_setopt($ch, CURLOPT_PORT, $PORT_NUMBER);
+        curl_setopt($ch, CURLOPT_POST, count(http_build_query($params)));
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+
+        // Time out configs
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT);
+        curl_setopt($ch, CURLOPT_TIMEOUT, TIMEOUT_DURATION); //timeout in seconds
+        // Simply configuring cURL to accept any server(peer) certificate for now. 
+        // This can be changed to CA certificate
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        // Execute post
+        $response = curl_exec($ch);
+        $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        $this->logparams['message'] = "Response from $MENU_URL:" . json_encode($response, JSON_FORCE_OBJECT);
+        CoreUtils::flog4php(4, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussdinfo", USSD_LOG_PROPERTIES);
+
+        // Array that will hold values to return - success or fail
+        $returnvals = array();
+
+        if (!$response) {
+            $returnvals['SUCCESS'] = FALSE;
+            $returnvals['MESSAGE'] = curl_error($ch);
+            $returnvals['DATA'] = array('HTTP_STATUS' => $http_status);
+        } else {
+            $returnvals['SUCCESS'] = TRUE;
+            $returnvals['MESSAGE'] = 'Successfully received response from menu systems';
+            $returnvals['DATA'] = array('HTTP_STATUS' => $http_status, 'JSON_RESPONSE' => $response);
+            // array("SUCCESS"="1","MESSAGE"=>"Successfully obtained response","DATA"=>array("HTTP_STATUS"=>200,""));
+        }
+
+        // Close connection
+        curl_close($ch);
+
+        return $returnvals;
+    }
+
+    /**
+     * Generic function that formulates error messages to be sent back to the
+     * ussdinterface script in JSON format.
+     * @param string $friendlyMessage
+     * @return string json string
+     */
+    public function errorResponse($friendlyMessage) {
+        $errorpayload = array();
+        $errorpayload['PAGE_STRING'] = $friendlyMessage;
+        $errorpayload['MNO_RESPONSE_SESSION_STATE'] = 'END';
+        $errorpayload['SESSION_ID'] = $this->activitiesclass->sessionID;
+        $errorpayload['MSISDN'] = $this->activitiesclass->MSISDN;
+
+        return json_encode($errorpayload, JSON_FORCE_OBJECT);
+    }
+
+}
+
+
