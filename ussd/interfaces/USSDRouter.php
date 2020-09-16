@@ -81,18 +81,15 @@ class USSDRouter {
 
             // Get URL  and various params
             //$URL = $this->computeRoute();
-	    $URL = array(
-		'SUCCESS' => true,
-		'DATA' => array(
-			//'apiUrl' => 'http://localhost/county/channels/ussd/menus/dynamic_menus/Ussd/Ussd.php',
-			//'apiUrl' => 'http://localhost/ipesav4/channels/ussd/menus/dynamic_menus/selfService/iPesaUssd.php',
-			//'apiUrl' => 'http://localhost/kwigira/web/channels/ussd/menus/dynamic_menus/microCredit/microCredit.php',
-			'apiUrl' => 'http://localhost/ipesav4/channels/ussd/menus/dynamic_menus/waterUssd/waterUSSD.php',
-			'apiPortNumber' => '80',
-			'clientSystemID' => 1,
-			'expiryPeriod' => '',
-			),	
-		);
+            $URL = array(
+            'SUCCESS' => true,
+            'DATA' => array(
+                'apiUrl' => 'http://localhost:8001/dynamic_menus/kwigira.php',
+                'apiPortNumber' => '8001',
+                'clientSystemID' => 1,
+                'expiryPeriod' => '',
+                ),	
+            );
 
             $this->logparams['message'] = 'Response after fetching URL from the hub channels database:' . json_encode($URL, JSON_FORCE_OBJECT);
             CoreUtils::flog4php(4, $this->activitiesclass->MSISDN, $this->logparams, __FILE__, __FUNCTION__, __LINE__, "ussdinfo", USSD_LOG_PROPERTIES);

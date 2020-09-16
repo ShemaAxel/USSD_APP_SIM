@@ -6,14 +6,13 @@ session_start();
 
 $hubServer = "localhost";
 $hubURL = "http://$hubServer/samsung-simulator";
-//$hubURL = "http://$hubServer:11007";
 $emulatorUrl = "http://localhost";
 
 
 define("sql_host", "localhost");
 define("sql_user", "root");
-define("sql_password", "r00t");
-define("sql_db", "samsung_emulator");
+define("sql_password", "ax3l1234");
+define("sql_db", "samsung_simulator");
 define("log_path",'/var/log/applications/logs/');
 define("fatalLogs", "/var/log/applications/logs/fatal.log");
 define("sqlLogs", "/var/log/applications/logs/sequel.log");
@@ -22,9 +21,9 @@ define("infoLogs", "/var/log/applications/logs/info.log");
 
 define("hub_SMS_URL", $hubURL."/SMS/web/gatewayInterfaces/EMGInterface.php");
 define("hub_DLR_URL", $hubURL."/SMS/web/APIs/DLRLogger.php");
-//define("hub_USSD_URL", $hubURL."/ussd/interfaces/emulatorInterface.php"); //http://KE-Hub4-MNO-Apps:9011/hub/smsInterfaces/gatewayInterfaces/EMGInterface.php
+// define("hub_USSD_URL", $hubURL."/ussd/interfaces/emulatorInterface.php"); //http://KE-Hub4-MNO-Apps:9011/hub/smsInterfaces/gatewayInterfaces/EMGInterface.php
 define("hub_USSD_URL", $hubURL."/ussd/interfaces/rw/mtn/index.php");
-define("simulator_URL", $emulatorUrl.":8000/ussd/samsung-simulator");
+define("simulator_URL", $emulatorUrl.":8000");
 define("MoMo_safURL", $emulatorUrl."/MomoSafaricomInterface.php");
 define("MoMo_airtelURL", $emulatorUrl."/MomoAirtelInterface.php");
 

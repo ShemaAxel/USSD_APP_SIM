@@ -463,7 +463,7 @@ function microtime_f() {
 
 function connectDB() {
     ORM::configure('mysql:host=localhost;dbname=samsung_simulator');
-    ORM::configure('username', 'axel');
+    ORM::configure('username', 'root');
     ORM::configure('password', 'ax3l1234');
     
     ORM::configure('id_column_overrides', array(
