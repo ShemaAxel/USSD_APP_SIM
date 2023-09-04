@@ -9,7 +9,7 @@ $hubURL = "http://$hubServer/samsung-simulator";
 $emulatorUrl = "http://localhost";
 
 
-define("sql_host", "localhost");
+define("sql_host", "localhost:3306"); // ADD DB PORT
 define("sql_user", "root");
 define("sql_password", "ax3l1234");
 define("sql_db", "samsung_simulator");
